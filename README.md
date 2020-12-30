@@ -26,7 +26,8 @@ parts of the compiler workflow:
      - `compiler run` - Execute a program using just-in-time compilation
      - `compiler build` - Generates a binary (optionally cross-compiling for different architectures)
      - `compiler check` - Checks a program for semantic correctness
-     - `compiler parse` - Checks a program for syntactic correctness 
+     - `compiler parse` - Checks a program for syntactic correctness
+     - `compiler ir` - Emits the LLVM IR code for a program 
 
 ## Starting Point
 
