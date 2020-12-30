@@ -39,13 +39,7 @@ Build::Build()
                Option("target", "Target architecture", Option::OPTION),
                Option("linker", "Linker command", Option::OPTION, "cc"),
                Option("object", "Generate an unlinked object file")},
-              "program.indie") {
-  const char* library_path = getenv("INDIE_PATH");
-  if (!library_path) {
-    library_path = ".";
-  }
-  options.push_back(Option("library", "Path to standard library",
-                           Option::OPTION, library_path));
+              "path") {
 }
 
 bool Build::execute(const filesystem::path& executable,

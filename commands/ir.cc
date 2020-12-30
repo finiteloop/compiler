@@ -33,13 +33,7 @@ IR::IR()
           {Option("output", "Write IR code to the given path", Option::OPTION),
            Option("strict", "Treat warnings as fatal errors"),
            Option("unoptimized", "Do not optimize the program")},
-          "program.indie") {
-  const char* library_path = getenv("INDIE_PATH");
-  if (!library_path) {
-    library_path = ".";
-  }
-  options.push_back(Option("library", "Path to standard library",
-                           Option::OPTION, library_path));
+          "path") {
 }
 
 bool IR::execute(const filesystem::path& executable, map<string, bool>& flags,
