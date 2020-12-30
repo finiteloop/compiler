@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "run.h"
+#include "ir.h"
 
-#include <llvm/ExecutionEngine/ExecutionEngine.h>
-#include <llvm/ExecutionEngine/GenericValue.h>
-#include <llvm/ExecutionEngine/MCJIT.h>
-#include <llvm/ExecutionEngine/SectionMemoryManager.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/FileSystem.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "../checker/check.h"
 #include "../emitter/emit.h"
@@ -30,11 +27,13 @@
 
 namespace compiler::commands {
 
-Run::Run()
-    : Command("run", "Run a program",
-              {Option("strict", "Treat warnings as fatal errors"),
-               Option("unoptimized", "Do not optimize the program")},
-              "program.indie") {
+IR::IR()
+    : Command(
+          "ir", "Emit LLVM assembly language for a program",
+          {Option("output", "Write IR code to the given path", Option::OPTION),
+           Option("strict", "Treat warnings as fatal errors"),
+           Option("unoptimized", "Do not optimize the program")},
+          "program.indie") {
   const char* library_path = getenv("INDIE_PATH");
   if (!library_path) {
     library_path = ".";
@@ -43,16 +42,12 @@ Run::Run()
                            Option::OPTION, library_path));
 }
 
-bool Run::execute(const filesystem::path& executable, map<string, bool>& flags,
-                  map<string, string>& options, vector<string>& arguments) {
+bool IR::execute(const filesystem::path& executable, map<string, bool>& flags,
+                 map<string, string>& options, vector<string>& arguments) {
   if (arguments.size() < 1) {
     print_help(executable);
     return false;
   }
-
-  // Initialize LLVM
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
 
   // Parse the program
   auto error = make_shared<Error::Terminal>();
@@ -68,27 +63,9 @@ bool Run::execute(const filesystem::path& executable, map<string, bool>& flags,
     return false;
   }
 
-  // Set up the LLVM JIT engine
+  // Emit LLVM IR code
   llvm::LLVMContext llvm_context;
   auto llvm_module = new llvm::Module(arguments[0], llvm_context);
-  llvm::EngineBuilder factory((std::unique_ptr<llvm::Module>(llvm_module)));
-  if (!flags["unoptimized"]) {
-    llvm::TargetOptions target_options;
-    std::unique_ptr<llvm::RTDyldMemoryManager> memory_manager(
-        new llvm::SectionMemoryManager());
-    factory.setEngineKind(llvm::EngineKind::JIT)
-        .setTargetOptions(target_options)
-        .setMCJITMemoryManager(std::move(memory_manager));
-  }
-  string llvm_error;
-  auto engine = factory.setErrorStr(&llvm_error).create();
-  if (!engine) {
-    error->report(Error::Level::ERROR, llvm_error);
-    return false;
-  }
-  llvm_module->setDataLayout(engine->getDataLayout());
-
-  // Emit LLVM IR code
   auto llvm_function = emitter::emit(module, llvm_module);
   if (!llvm_function) {
     return false;
@@ -97,9 +74,21 @@ bool Run::execute(const filesystem::path& executable, map<string, bool>& flags,
     emitter::optimize(llvm_module);
   }
 
-  // Run the program
-  engine->finalizeObject();
-  engine->runFunction(llvm_function, {});
+  // Write the LLVM IR
+  shared_ptr<llvm::raw_fd_ostream> out;
+  if (!options["output"].empty()) {
+    std::error_code file_error;
+    out = make_shared<llvm::raw_fd_ostream>(options["output"], file_error,
+                                            llvm::sys::fs::F_None);
+    if (file_error) {
+      error->report(Error::ERROR, "Could not write " + options["output"] +
+                                      ": " + file_error.message());
+      return false;
+    }
+  } else {
+    out = make_shared<llvm::raw_fd_ostream>(STDOUT_FILENO, false);
+  }
+  llvm_module->print(*out, nullptr);
   return true;
 }
 

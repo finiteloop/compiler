@@ -1,52 +1,32 @@
-/*
- * Copyright 2020 Bret Taylor
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 %{
 
-#include <algorithm>
+#include <inttypes.h>
+#include <utf8.h>
 
-#include "ast.h"
 #include "grammar.h"
-#include "state.h"
 
-using namespace compiler;
 using namespace compiler::parser;
 
-#define YY_USER_ACTION { \
-  State* state = (State*)yyget_extra(yyscanner); \
-  yylloc->first_line = state->line; \
-  yylloc->last_line = state->line; \
-  yylloc->first_column = state->column; \
-  yylloc->last_column = state->column + yyleng - 1; \
-  state->column += yyleng; \
+#define YY_INPUT(buffer, result, size) {\
+  auto state = yyget_extra(yyscanner); \
+  state->input.read(buffer, size); \
+  result = state->input.gcount(); \
 }
 
-#define YY_INPUT(buffer, result, buffer_size) \
-  State* state = ((State*)yyget_extra(yyscanner)); \
-  result = std::min(buffer_size, state->data.size()); \
-  memcpy(buffer, state->data.data(), result); \
-  state->data = state->data.substr(result);
+#define YY_USER_ACTION {\
+  auto state = yyget_extra(yyscanner); \
+  auto length = utf8::distance(yytext, yytext + yyleng); \
+  yylloc->begin = state->position; \
+  state->position.column += length; \
+  yylloc->end.line = state->position.line; \
+  yylloc->end.column = state->position.column - 1; \
+}
 
 %}
 
 %option reentrant
 %option bison-locations
 %option bison-bridge
-%option stack
-%option yylineno
 %option noyywrap
 %option noyy_top_state
 %option noyy_pop_state
@@ -54,57 +34,35 @@ using namespace compiler::parser;
 %option noinput
 %option nounput
 
-%s N
-
-Integer ([\-]?[0-9]+)
-
 %%
 
- BEGIN(N);
-
- /* Whitespace */
-
-<*>[ \t]+ {
-  /* Ignore whitespace */
-}
-
  /* Comments */
+#[^\n]* {}
 
-<N>"#"[^\n]* {
-  /* Ignore comments */
-}
+ /* Inline whitespace */
+[ \t\v\f\r]+ {}
 
- /* Operators */
-
-<N>"<<" {
-  return T_ShiftLeft;
-}
-<N>">>" {
-  return T_ShiftRight;
-}
-<N>[+\-*/%&\|\^] {
+ /* New line */
+\n {
+  auto state = yyget_extra(yyscanner);
+  state->position.line++;
+  state->position.column = 1;
   return yytext[0];
 }
 
- /* New lines */
+ /* Multi-character symbols */
+"<<" { return Grammar::token::OperatorShiftLeft; }
+">>" { return Grammar::token::OperatorShiftRight; }
 
-<N>\n {
-  State* state = (State*)yyget_extra(yyscanner);
-  state->line++;
-  state->column = 1;
-  return '\n';
+ /* Integer literal */
+[-+]?[0-9]+ {
+  yylval->emplace<std::shared_ptr<IntegerLiteral>>(
+      std::make_shared<IntegerLiteral>(*yylloc, strtol(yytext, nullptr, 10)));
+  return Grammar::token::IntegerLiteral;
 }
 
- /* Literals */
-
-<N>{Integer} {
-  yylval->integer = strtol(yytext, nullptr, 10);
-  return T_IntegerLiteral;
-}
-
- /* Scanner error */
-
-<N>. {
+ /* All other symbols */
+. {
   return yytext[0];
 }
 

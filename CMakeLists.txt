@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.3)
 
-project(compiler VERSION 1.0.0)
+project(compiler VERSION 1.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-find_package(BISON)
+find_package(BISON 3.3)
 IF(BISON_FOUND)
     BISON_TARGET(grammar parser/grammar.y
                  ${CMAKE_CURRENT_SOURCE_DIR}/parser/grammar.cc
@@ -26,13 +26,12 @@ add_executable(compiler
     checker/check.cc
     commands/build.cc
     commands/check.cc
-    commands/color.cc
     commands/command.cc
     commands/help.cc
+    commands/ir.cc
     commands/parse.cc
     commands/run.cc
     core/error.cc
-    core/file.cc
     emitter/emit.cc
     emitter/expression.cc
     emitter/optimize.cc
@@ -41,6 +40,9 @@ add_executable(compiler
     parser/parse.cc
     parser/scanner.cc)
 target_compile_options(compiler PUBLIC -Wall -Werror -Wno-register)
+
+# UTF-8
+target_include_directories(compiler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ext/utf8/source)
 
 # LLVM
 add_subdirectory(ext/llvm/llvm)

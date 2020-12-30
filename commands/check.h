@@ -18,15 +18,14 @@
 
 namespace compiler::commands {
 
-// Verifies the semantic correctness of a program.
 class Check : public Command {
  public:
   Check();
 
  protected:
-  virtual bool execute(const string& executable, map<string, bool>& flags,
-                       map<string, string>& options,
-                       vector<string>& arguments) override;
+  bool execute(const filesystem::path& executable, map<string, bool>& flags,
+               map<string, string>& options,
+               vector<string>& arguments) override;
 };
 
 }

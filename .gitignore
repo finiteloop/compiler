@@ -1,3 +1,8 @@
 build/
 .vscode
 .DS_Store
+
+parser/grammar.h
+parser/grammar.cc
+parser/scanner.h
+parser/scanner.cc

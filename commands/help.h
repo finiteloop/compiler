@@ -14,25 +14,28 @@
 
 #pragma once
 
+#include <filesystem>
+#include <memory>
+#include <vector>
+
 #include "command.h"
 
 namespace compiler::commands {
 
-// Prints help information for the all the commands supported by the compiler.
 class Help : public Command {
  public:
-  Help(const string& executable, const vector<shared_ptr<Command>>& commands);
+  Help(const filesystem::path& executable,
+       const vector<shared_ptr<Command>>& commands);
 
-  // Lists all the commands supported by the compiler.
   void print(std::ostream& out, bool tty);
 
-  string executable;
+  filesystem::path executable;
   const vector<shared_ptr<Command>>& commands;
 
  protected:
-  virtual bool execute(const string& executable, map<string, bool>& flags,
-                       map<string, string>& options,
-                       vector<string>& arguments) override;
+  bool execute(const filesystem::path& executable, map<string, bool>& flags,
+               map<string, string>& options,
+               vector<string>& arguments) override;
 };
 
 }

@@ -18,15 +18,14 @@
 
 namespace compiler::commands {
 
-// Verifies the syntactic correctness of a program.
 class Parse : public Command {
  public:
   Parse();
 
  protected:
-  virtual bool execute(const string& executable, map<string, bool>& flags,
-                       map<string, string>& options,
-                       vector<string>& arguments) override;
+  bool execute(const filesystem::path& executable, map<string, bool>& flags,
+               map<string, string>& options,
+               vector<string>& arguments) override;
 };
 
 }

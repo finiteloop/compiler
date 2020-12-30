@@ -14,30 +14,18 @@
 
 #pragma once
 
-#include "../core/common.h"
-#include "../core/error.h"
-#include "ast.h"
+#include "command.h"
 
-namespace compiler::parser {
+namespace compiler::commands {
 
-// Stores parser state when parsing the AST with Bison and Flex.
-class State {
+class IR : public Command {
  public:
-  State(shared_ptr<Error> error, shared_ptr<Module> module)
-      : module(module),
-        error(error),
-        data(module->file->contents),
-        state(nullptr),
-        line(1),
-        column(1) {
-  }
+  IR();
 
-  shared_ptr<Module> module;
-  shared_ptr<Error> error;
-  string data;
-  void* state;
-  int line;
-  int column;
+ protected:
+  bool execute(const filesystem::path& executable, map<string, bool>& flags,
+               map<string, string>& options,
+               vector<string>& arguments) override;
 };
 
 }

@@ -21,12 +21,10 @@
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetRegistry.h>
 #include <llvm/Support/TargetSelect.h>
-#include <llvm/Support/raw_os_ostream.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "../checker/check.h"
-#include "../core/error.h"
 #include "../emitter/emit.h"
 #include "../emitter/optimize.h"
 #include "../parser/parse.h"
@@ -34,21 +32,25 @@
 namespace compiler::commands {
 
 Build::Build()
-    : Command("build", "Build a binary for a program",
-              {
-                  Option("strict", "Treat compiler warnings as fatal errors"),
-                  Option("unoptimized", "Do not optimize the program"),
-                  Option("output", "Output binary name", Option::OPTION),
-                  Option("target", "Target architecture (see options below)",
-                         Option::OPTION),
-                  Option("llvm", "Generate LLVM IR assembly code"),
-                  Option("object", "Generate an unlinked object file"),
-              },
-              "path…") {
+    : Command("build", "Build an executable binary for a program",
+              {Option("strict", "Treat warnings as fatal errors"),
+               Option("unoptimized", "Do not optimize the program"),
+               Option("output", "Output binary name", Option::OPTION),
+               Option("target", "Target architecture", Option::OPTION),
+               Option("linker", "Linker command", Option::OPTION, "cc"),
+               Option("object", "Generate an unlinked object file")},
+              "program.indie") {
+  const char* library_path = getenv("INDIE_PATH");
+  if (!library_path) {
+    library_path = ".";
+  }
+  options.push_back(Option("library", "Path to standard library",
+                           Option::OPTION, library_path));
 }
 
-bool Build::execute(const string& executable, map<string, bool>& flags,
-                    map<string, string>& options, vector<string>& arguments) {
+bool Build::execute(const filesystem::path& executable,
+                    map<string, bool>& flags, map<string, string>& options,
+                    vector<string>& arguments) {
   if (arguments.size() < 1) {
     print_help(executable);
     return false;
@@ -61,80 +63,43 @@ bool Build::execute(const string& executable, map<string, bool>& flags,
   llvm::InitializeAllAsmPrinters();
 
   // Parse the program
-  auto error = make_shared<TerminalError>();
-  Error::Level fail_level =
-      flags["strict"] ? Error::Level::WARNING : Error::Level::ERROR;
-  vector<shared_ptr<parser::Module>> modules;
+  auto error = make_shared<Error::Terminal>();
+  auto fail_level = flags["strict"] ? Error::WARNING : Error::ERROR;
   auto module = parser::parse(error, arguments[0]);
-  if (!module || error->count(Error::Level::ERROR) > 0) {
+  if (!module) {
     return false;
   }
 
   // Check for correctness
-  if (!checker::check(error, module) || error->count(fail_level) > 0) {
+  auto symbols = checker::check(error, module);
+  if (!symbols || error->count(fail_level) > 0) {
     return false;
   }
 
   // Emit LLVM IR code
   llvm::LLVMContext llvm_context;
-  auto llvm_module = new llvm::Module(arguments[0], llvm_context);
-  auto llvm_function = emitter::emit(module, llvm_module);
-  if (!llvm_function) {
-    return false;
-  }
-
-  // Build ASM for target
-  llvm::EngineBuilder factory((std::unique_ptr<llvm::Module>(llvm_module)));
-  std::string llvm_error;
-  auto engine = factory.setErrorStr(&llvm_error).create();
-  if (!engine) {
-    error->report(nullptr, Error::Level::ERROR, llvm_error);
-    return false;
-  }
   string target = options["target"];
   if (target.empty()) {
     target = llvm::sys::getDefaultTargetTriple();
   }
-  llvm_module->setTargetTriple(target.c_str());
+  string llvm_error;
   auto llvm_target =
       llvm::TargetRegistry::lookupTarget(target.c_str(), llvm_error);
   if (!llvm_target) {
-    std::cerr << "Invalid LLVM target: " << llvm_error;
+    error->report(Error::ERROR, llvm_error);
     return false;
   }
   auto llvm_machine = llvm_target->createTargetMachine(
       target.c_str(), "generic", "", llvm::TargetOptions(),
       llvm::Optional<llvm::Reloc::Model>());
+  auto llvm_module = new llvm::Module(arguments[0], llvm_context);
   llvm_module->setDataLayout(llvm_machine->createDataLayout());
+  auto llvm_function = emitter::emit(module, llvm_module);
+  if (!llvm_function) {
+    return false;
+  }
   if (!flags["unoptimized"]) {
-    std::cerr << "XXXX" << std::endl;
     emitter::optimize(llvm_module);
-  }
-
-  // Determine our output file name
-  string name = options["output"];
-  if (name.empty()) {
-    name = file_name(arguments[0]);
-    if (name.size() > 6 && name.substr(name.size() - 6) == ".indie") {
-      name = name.substr(0, name.size() - 6);
-    }
-    if (flags["llvm"]) {
-      name += ".ll";
-    } else if (flags["object"]) {
-      name += ".o";
-    }
-  }
-
-  // Print the LLVM IR code if requested
-  if (flags["llvm"]) {
-    std::error_code file_error;
-    llvm::raw_fd_ostream out(name.c_str(), file_error, llvm::sys::fs::F_None);
-    if (file_error) {
-      std::cerr << "Could write file: " << file_error.message() << std::endl;
-      return false;
-    }
-    llvm_module->print(out, nullptr);
-    return true;
   }
 
   // Write the object file
@@ -143,64 +108,57 @@ bool Build::execute(const string& executable, map<string, bool>& flags,
   strcpy(object_path + strlen(P_tmpdir), "XXXXXXXXXX.o");
   auto object_fd = mkstemps(object_path, 2);
   if (object_fd == -1) {
-    std::cerr << "Could not create temporary file: " << object_path
-              << std::endl;
+    error->report(Error::ERROR,
+                  "Could not create temporary file: " + string(object_path));
     return false;
   }
   close(object_fd);
   std::error_code file_error;
   llvm::raw_fd_ostream out(object_path, file_error, llvm::sys::fs::F_None);
   if (file_error) {
-    std::cerr << "Could write file: " << file_error.message() << std::endl;
+    error->report(Error::ERROR,
+                  "Could not write file: " + file_error.message());
     return false;
   }
   llvm::legacy::PassManager pass;
   if (llvm_machine->addPassesToEmitFile(pass, out, nullptr,
                                         llvm::CGFT_ObjectFile)) {
-    std::cerr
-        << "LLVM cannot emit native object files for the target architecture: "
-        << target << std::endl;
+    error->report(
+        Error::ERROR,
+        "LLVM cannot emit object files for the target architecture: " + target);
     return false;
   }
   pass.run(*llvm_module);
   out.flush();
 
+  // Determine our output file name
+  string output_name = options["output"];
+  if (output_name.empty()) {
+    output_name = filesystem::path(arguments[0]).stem();
+    if (flags["object"]) {
+      output_name += ".o";
+    }
+  }
+
   // Finish with the object file if requested
   if (flags["object"]) {
-    if (rename(object_path, name.c_str()) == -1) {
-      std::cerr << "Could not move " << object_path << " to " << name
-                << std::endl;
+    if (rename(object_path, output_name.c_str()) == -1) {
+      error->report(Error::ERROR,
+                    "Could not move " + string(object_path) + " to " + name);
       return false;
     }
     unlink(object_path);
     return true;
   }
 
-  std::cerr << "Linking is not yet implemented." << std::endl;
-  std::cerr << "Run with -object to generate an object file in the meantime."
-            << std::endl;
-  return false;
-}
-
-void Build::print_secondary_help(std::ostream& out, bool tty) {
-  llvm::InitializeAllTargetInfos();
-  vector<std::pair<string, string>> targets;
-  size_t tab_width = 0;
-  for (auto& target : llvm::TargetRegistry::targets()) {
-    string name(target.getName());
-    targets.push_back(std::make_pair(name, target.getShortDescription()));
-    tab_width = std::max(tab_width, name.size() + 4);
+  // Link the object file using the cc command to include the C standard library
+  string command = options["linker"] + " " + object_path + " -o " + output_name;
+  if (system(command.c_str()) == -1) {
+    error->report(Error::ERROR, "Could not execute linker: " + command);
+    return false;
   }
-  out << "Valid architectures for -target=… (defaults to "
-      << llvm::sys::getDefaultTargetTriple() << "):" << std::endl;
-  for (auto& item : targets) {
-    out << "  " << item.first;
-    for (size_t i = item.first.size(); i < tab_width; i++) {
-      out << " ";
-    }
-    out << item.second << std::endl;
-  }
-  out << std::endl;
+  unlink(object_path);
+  return true;
 }
 
 }

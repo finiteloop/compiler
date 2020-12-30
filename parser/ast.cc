@@ -16,37 +16,12 @@
 
 namespace compiler::parser {
 
-AST::AST(shared_ptr<Location> location) : location(location) {
+void Binary::handle(Expression::Handler& handler) {
+  handler.handle_binary(*this);
 }
 
-AST::~AST() {
-}
-
-Expression::Expression(shared_ptr<Location> location) : AST(location) {
-}
-
-Binary::Binary(shared_ptr<Location> location, shared_ptr<Expression> lhs,
-               Operator op, shared_ptr<Expression> rhs)
-    : Expression(location), lhs(lhs), op(op), rhs(rhs) {
-}
-
-void Binary::handle(Handler* handler) {
-  handler->handle_binary(*this);
-}
-
-IntegerLiteral::IntegerLiteral(shared_ptr<Location> location, int64_t value)
-    : Expression(location), value(value) {
-}
-
-void IntegerLiteral::handle(Expression::Handler* handler) {
-  handler->handle_integer_literal(*this);
-}
-
-Module::Module(shared_ptr<File> file)
-    : AST(make_shared<Location>(file, 1, 1, 1, 1)), file(file) {
-}
-
-Expression::Handler::~Handler() {
+void IntegerLiteral::handle(Expression::Handler& handler) {
+  handler.handle_integer_literal(*this);
 }
 
 }

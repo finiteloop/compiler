@@ -15,33 +15,38 @@
 #pragma once
 
 #include "../core/common.h"
-#include "../core/file.h"
+#include "../core/location.h"
 
 namespace compiler::parser {
 
 // A node in the program's abstract syntax tree.
 class AST {
  public:
-  virtual ~AST();
+  virtual ~AST() {
+  }
 
   // The file location of this node in the program.
-  shared_ptr<Location> location;
+  Location location;
 
  protected:
-  AST(shared_ptr<Location> location);
+  AST(const Location& location) : location(location) {
+  }
 };
 
+// A node that expresses a value.
 class Expression : public AST {
  public:
   class Handler;
 
   // Dynamically dispatch based on the runtime type of this expression.
-  virtual void handle(Handler* handler) = 0;
+  virtual void handle(Handler& handler) = 0;
 
  protected:
-  Expression(shared_ptr<Location> location);
+  Expression(const Location& location) : AST(location) {
+  }
 };
 
+// A binary operation on two expressions.
 class Binary : public Expression {
  public:
   enum Operator {
@@ -57,38 +62,46 @@ class Binary : public Expression {
     BIT_XOR,
   };
 
-  Binary(shared_ptr<Location> location, shared_ptr<Expression> lhs, Operator op,
-         shared_ptr<Expression> rhs);
+  Binary(const Location& location, shared_ptr<Expression> lhs, Operator op,
+         shared_ptr<Expression> rhs)
+      : Expression(location), lhs(lhs), op(op), rhs(rhs) {
+  }
 
-  virtual void handle(Handler* handler) override;
+  void handle(Handler& handler) override;
 
   shared_ptr<Expression> lhs;
   Operator op;
   shared_ptr<Expression> rhs;
 };
 
+// A 64-bit integer constant.
 class IntegerLiteral : public Expression {
  public:
-  IntegerLiteral(shared_ptr<Location> location, int64_t value);
+  IntegerLiteral(const Location& location, int64_t value)
+      : Expression(location), value(value) {
+  }
 
-  virtual void handle(Handler* handler) override;
+  void handle(Handler& handler) override;
 
   int64_t value;
 };
 
-class Module : public AST {
+class Module {
  public:
-  Module(shared_ptr<File> file);
+  Module(const filesystem::path& path) : path(path) {
+  }
 
-  shared_ptr<File> file;
+  filesystem::path path;
   vector<shared_ptr<Expression>> expressions;
 };
 
 class Expression::Handler {
  public:
-  virtual ~Handler();
-  virtual void handle_binary(const Binary&) = 0;
-  virtual void handle_integer_literal(const IntegerLiteral&) = 0;
+  virtual ~Handler() {
+  }
+
+  virtual void handle_binary(Binary&) = 0;
+  virtual void handle_integer_literal(IntegerLiteral&) = 0;
 };
 
 }

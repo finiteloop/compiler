@@ -14,18 +14,21 @@
 
 #pragma once
 
-#include "command.h"
+#include "common.h"
 
-namespace compiler::commands {
+namespace compiler {
 
-class Build : public Command {
- public:
-  Build();
+// A position within a source file.
+struct Position {
+  shared_ptr<filesystem::path> path;
+  size_t line = 1;
+  size_t column = 1;
+};
 
- protected:
-  bool execute(const filesystem::path& executable, map<string, bool>& flags,
-               map<string, string>& options,
-               vector<string>& arguments) override;
+// The location of a sequence of characters in a source file.
+struct Location {
+  Position begin;
+  Position end;
 };
 
 }

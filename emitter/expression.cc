@@ -15,13 +15,13 @@ class Emitter : private parser::Expression::Handler {
   }
 
   llvm::Value* emit(shared_ptr<parser::Expression> expression) {
-    expression->handle(this);
+    expression->handle(*this);
     assert(result_);
     return result_;
   }
 
  private:
-  virtual void handle_binary(const parser::Binary& ast) override {
+  void handle_binary(parser::Binary& ast) override {
     auto lhs = emit_expression(builder_, ast.lhs);
     auto rhs = emit_expression(builder_, ast.rhs);
     switch (ast.op) {
@@ -58,8 +58,7 @@ class Emitter : private parser::Expression::Handler {
     }
   }
 
-  virtual void handle_integer_literal(
-      const parser::IntegerLiteral& ast) override {
+  void handle_integer_literal(parser::IntegerLiteral& ast) override {
     result_ = builder_.getInt64(ast.value);
   }
 

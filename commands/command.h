@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <iostream>
+
 #include "../core/common.h"
 
 namespace compiler::commands {
@@ -29,7 +31,12 @@ class Option {
   };
 
   Option(const string& name, const string& description, Type type = FLAG,
-         const char* default_value = "");
+         string default_value = "")
+      : name(name),
+        description(description),
+        type(type),
+        default_value(default_value) {
+  }
 
   string name;
   string description;
@@ -41,19 +48,27 @@ class Option {
 class Command {
  public:
   Command(const string& name, const string& description,
-          const vector<Option>& options, const char* argument_placeholder = "");
-  virtual ~Command();
+          const vector<Option>& options, string argument_placeholder = "")
+      : name(name),
+        description(description),
+        options(options),
+        argument_placeholder(argument_placeholder) {
+  }
+
+  virtual ~Command() {
+  }
 
   // Runs this command with the given arguments, returning true if the command
   // successfully executes.
-  bool run(const string& executable, const vector<string>& arguments);
+  bool run(const filesystem::path& executable, const vector<string>& arguments);
 
   // Prints the help information for this command to stderr.
-  void print_help(const string& executable);
+  void print_help(const filesystem::path& executable);
 
   // Prints the help information for this command to the given stream. If `tty`
   // is true, we print using terminal colors.
-  void print_help(const string& executable, std::ostream& out, bool tty);
+  void print_help(const filesystem::path& executable, std::ostream& out,
+                  bool tty);
 
   string name;
   string description;
@@ -61,10 +76,9 @@ class Command {
   string argument_placeholder;
 
  protected:
-  virtual bool execute(const string& executable, map<string, bool>& flags,
-                       map<string, string>& options,
+  virtual bool execute(const filesystem::path& executable,
+                       map<string, bool>& flags, map<string, string>& options,
                        vector<string>& arguments) = 0;
-  virtual void print_secondary_help(std::ostream& out, bool tty);
 };
 
 }

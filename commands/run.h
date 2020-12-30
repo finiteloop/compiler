@@ -18,15 +18,14 @@
 
 namespace compiler::commands {
 
-// Runs a program.
 class Run : public Command {
  public:
   Run();
 
  protected:
-  virtual bool execute(const string& executable, map<string, bool>& flags,
-                       map<string, string>& options,
-                       vector<string>& arguments) override;
+  bool execute(const filesystem::path& executable, map<string, bool>& flags,
+               map<string, string>& options,
+               vector<string>& arguments) override;
 };
 
 }

@@ -14,36 +14,32 @@
 
 #include "parse.h"
 
-#include "../core/error.h"
 #include "../parser/parse.h"
 
 namespace compiler::commands {
 
 Parse::Parse()
-    : Command("parse", "Verify the syntax of a program",
-              {
-                  Option("strict", "Treat compiler warnings as fatal errors"),
-              },
-              "path…") {
+    : Command("parse", "Check the syntax of a module",
+              {Option("strict", "Treat warnings as fatal errors")}, "path…") {
 }
 
-bool Parse::execute(const string& executable, map<string, bool>& flags,
-                    map<string, string>& options,
+bool Parse::execute(const filesystem::path& executable,
+                    map<string, bool>& flags, map<string, string>& options,
                     vector<string>& arguments) {
   if (arguments.size() < 1) {
     print_help(executable);
     return false;
   }
-  auto error = make_shared<TerminalError>();
-  Error::Level fail_level =
-      flags["strict"] ? Error::Level::WARNING : Error::Level::ERROR;
+  auto fail_level = flags["strict"] ? Error::WARNING : Error::ERROR;
   bool success = true;
-  for (auto path : arguments) {
-    if (!parser::parse(error, path)) {
+  for (auto& path : arguments) {
+    auto error = make_shared<Error::Terminal>();
+    auto module = parser::parse(error, path);
+    if (!module || error->count(fail_level) > 0) {
       success = false;
     }
   }
-  return success && error->count(fail_level) == 0;
+  return success;
 }
 
 }

@@ -14,41 +14,40 @@
 
 #include "check.h"
 
+#include <stdlib.h>
+
 #include "../checker/check.h"
-#include "../core/error.h"
 #include "../parser/parse.h"
-#include "parse.h"
 
 namespace compiler::commands {
 
 Check::Check()
-    : Command("check", "Verify the correctness of a program",
-              {
-                  Option("strict", "Treat compiler warnings as fatal errors"),
-              },
-              "path…") {
+    : Command("check", "Check the correctness of a module",
+              {Option("strict", "Treat warnings as fatal errors")}, "path…") {
 }
 
-bool Check::execute(const string& executable, map<string, bool>& flags,
-                    map<string, string>& options, vector<string>& arguments) {
+bool Check::execute(const filesystem::path& executable,
+                    map<string, bool>& flags, map<string, string>& options,
+                    vector<string>& arguments) {
   if (arguments.size() < 1) {
     print_help(executable);
     return false;
   }
-  auto error = make_shared<TerminalError>();
-  Error::Level fail_level =
-      flags["strict"] ? Error::Level::WARNING : Error::Level::ERROR;
+  auto fail_level = flags["strict"] ? Error::WARNING : Error::ERROR;
   bool success = true;
-  for (auto path : arguments) {
-    if (auto module = parser::parse(error, path)) {
-      if (!checker::check(error, module)) {
-        success = false;
-      }
-    } else {
+  for (auto& path : arguments) {
+    auto error = make_shared<Error::Terminal>();
+    auto module = parser::parse(error, path);
+    if (!module) {
+      success = false;
+      continue;
+    }
+    auto symbols = checker::check(error, module);
+    if (!symbols || error->count(fail_level) > 0) {
       success = false;
     }
   }
-  return success && error->count(fail_level) == 0;
+  return success;
 }
 
 }

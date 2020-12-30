@@ -16,16 +16,54 @@
 
 namespace compiler::commands {
 
-// Our named colors, which we use for terminals that support color.
-enum class Color {
-  COMMAND,
-  OPTIONS,
-  ARGUMENTS,
-  DESCRIPTION,
-  ERROR,
-};
+// Our named colors, which make our command line interface more useful in
+// terminals that support color.
+class Color {
+ public:
+  Color(bool tty) : tty(tty) {
+  }
 
-// Returns the given value colorized if `tty` is true.
-string color(Color color, const string& value, bool tty);
+  inline string error(const string& value) const {
+    if (tty) {
+      return "\033[31;1m" + value + "\033[0m";
+    } else {
+      return value;
+    }
+  }
+
+  inline string success(const string& value) const {
+    if (tty) {
+      return "\033[32;1m" + value + "\033[0m";
+    } else {
+      return value;
+    }
+  }
+
+  inline string command(const string& value) const {
+    if (tty) {
+      return "\033[1m" + value + "\033[0m";
+    } else {
+      return value;
+    }
+  }
+
+  inline string option(const string& value) const {
+    if (tty) {
+      return "\033[2m[" + value + "]\033[0m";
+    } else {
+      return "[" + value + "]";
+    }
+  }
+
+  inline string arguments(const string& value) const {
+    if (tty) {
+        return "\033[2m" + value + "\033[0m";
+    } else {
+      return value;
+    }
+  }
+
+  bool tty;
+};
 
 }

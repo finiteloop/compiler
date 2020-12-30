@@ -16,93 +16,104 @@
 
 %{
 
-#include "../core/common.h"
-#include "../core/file.h"
-#include "ast.h"
 #include "grammar.h"
-#include "state.h"
-
-using namespace compiler;
-using namespace compiler::parser;
-
-int yylex(YYSTYPE*, YYLTYPE*, void*);
-
-#define YYPARSE_PARAM state
-#define YYLEX_PARAM ((State*) state)->state
-
-#define loc(yloc) (make_shared<Location>( \
-  ((State*)state)->module->file, yloc.first_line, yloc.first_column, \
-  yloc.last_line, yloc.last_column))
-
-#define yyerror(message) \
-  ((State*)state)->error->report(loc(yylloc), Error::Level::ERROR, message);
+#include "scanner.h"
 
 %}
 
-%pure_parser
+%require "3.3"
+%language "c++"
+%define api.value.type variant
+%define api.namespace { compiler::parser }
+%define api.location.type { Location }
+%define api.parser.class { Grammar }
+%lex-param { void* yyscanner }
+%parse-param { void* yyscanner }
 %locations
 
-%union {
-  int64_t integer;
-  compiler::parser::Expression* expression;
-  compiler::parser::Module* module;
+%code requires {
+  #include <iostream>
+  #include "../core/error.h"
+  #include "ast.h"
 }
 
-%token<integer> T_IntegerLiteral;
+%code provides {
+  namespace compiler::parser {
+    struct State {
+      std::istream& input;
+      Position position;
+      shared_ptr<Error> error;
+      shared_ptr<Module> module;
+    };
+  }
 
-%token T_ShiftLeft
-%token T_ShiftRight
+  typedef compiler::parser::Grammar::semantic_type YYSTYPE;
+  typedef compiler::parser::Grammar::location_type YYLTYPE;
+  #define YY_EXTRA_TYPE compiler::parser::State*
+}
 
-%type<expression> Binary
-%type<expression> Expression
-%type<module> Module
+%token<shared_ptr<IntegerLiteral>> IntegerLiteral;
+
+%token OperatorShiftLeft
+%token OperatorShiftRight
+
+%nterm<shared_ptr<Binary>> Binary
+%nterm<shared_ptr<Expression>> Expression
+%nterm<shared_ptr<Module>> Module
 
 %left '+' '-'
 %left '*' '/' '%'
-%left '&' '|' '^' T_ShiftLeft T_ShiftRight
+%left '&' '|' '^' OperatorShiftLeft OperatorShiftRight
 
 %%
 
 Module: Module Expression '\n' {
   $$ = $1;
-  $$->expressions.push_back(shared_ptr<Expression>($2));
-  $$->location = $$->location->merge(loc(@3));
+  $$->expressions.push_back($2);
 } | Module '\n' {
   $$ = $1;
-  $$->location = $$->location->merge(loc(@2));
 } | {
-  $$ = ((State*)state)->module.get();
+  auto state = yyget_extra(yyscanner);
+  auto module = make_shared<Module>(*state->position.path);
+  state->module = module;
+  $$ = module;
 }
 
 Expression: Binary {
   $$ = $1;
-} | T_IntegerLiteral {
-  $$ = new IntegerLiteral(loc(@1), $1);
+} | IntegerLiteral {
+  $$ = $1;
 } | '(' Expression ')' {
   $$ = $2;
-  $$->location = loc(@1)->merge(loc(@3));
+  $$->location = @$;
 }
 
 Binary: Expression '+' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::ADD, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::ADD, $3);
 } | Expression '-' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::SUBTRACT, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::SUBTRACT, $3);
 } | Expression '*' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::MULTIPLY, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::MULTIPLY, $3);
 } | Expression '/' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::DIVIDE, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::DIVIDE, $3);
 } | Expression '%' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::MOD, shared_ptr<Expression>($3));
-} | Expression T_ShiftLeft Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::SHIFT_LEFT, shared_ptr<Expression>($3));
-} | Expression T_ShiftRight Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::SHIFT_RIGHT, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::MOD, $3);
+} | Expression OperatorShiftLeft Expression {
+  $$ = make_shared<Binary>(@$, $1, Binary::SHIFT_LEFT, $3);
+} | Expression OperatorShiftRight Expression {
+  $$ = make_shared<Binary>(@$, $1, Binary::SHIFT_RIGHT, $3);
 } | Expression '&' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::BIT_AND, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::BIT_AND, $3);
 } | Expression '|' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::BIT_OR, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::BIT_OR, $3);
 } | Expression '^' Expression {
-  $$ = new Binary($1->location->merge($3->location), shared_ptr<Expression>($1), Binary::BIT_XOR, shared_ptr<Expression>($3));
+  $$ = make_shared<Binary>(@$, $1, Binary::BIT_XOR, $3);
 }
 
 %%
+
+void compiler::parser::Grammar::error(
+    const compiler::Location& location,
+    const std::string& message) {
+  yyget_extra(yyscanner)->error->report(compiler::Error::ERROR, location, message);
+}

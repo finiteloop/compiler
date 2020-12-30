@@ -20,6 +20,6 @@
 
 namespace compiler::parser {
 
-shared_ptr<Module> parse(shared_ptr<Error> error, const string& path);
+shared_ptr<Module> parse(shared_ptr<Error> error, const filesystem::path& path);
 
 }

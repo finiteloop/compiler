@@ -14,20 +14,46 @@
 
 #include "error.h"
 
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <stdio.h>
 #include <unistd.h>
+#include <utf8.h>
 
 namespace compiler {
 
-// Returns the given path with the current working directory prefix removed.
-static string short_path_name(const string& path) {
-  char cwd[1024];
-  if (getcwd(cwd, sizeof(cwd))) {
-    size_t cwd_length = strlen(cwd);
-    if (path.size() > cwd_length && path.substr(0, cwd_length) == cwd) {
-      return path.substr(cwd_length + 1);
-    }
+namespace {
+
+// Formats colors for TTY-compatible terminals.
+class Color {
+ public:
+  Color(Error::Level level) : level_(level) {
   }
-  return path;
+
+  inline string underline(const string& value) {
+    return (level_ == Error::WARNING ? "\033[33;1;4m" : "\033[31;1;4m") +
+           value + "\033[0m";
+  }
+
+  inline string bold(const string& value) {
+    return (level_ == Error::WARNING ? "\033[33;1m" : "\033[31;1m") + value +
+           "\033[0m";
+  }
+
+  inline string colorful(const string& value) {
+    return (level_ == Error::WARNING ? "\033[33m" : "\033[31m") + value +
+           "\033[0m";
+  }
+
+  inline string light(const string& value) {
+    return "\033[2m" + value + "\033[0m";
+  }
+
+ private:
+  Error::Level level_;
+};
+
 }
 
 // Left pads the given line number based on a given uniform prefix size.
@@ -36,132 +62,128 @@ static string line_number_prefix(int line_number, string prefix = "",
   std::stringstream s;
   s << line_number;
   auto value = s.str();
-  string result = "";
+  string result;
   for (size_t i = value.size(); i < 6 - prefix_size; i++) {
     result += " ";
   }
   return result + prefix + "\033[2m" + value + "\033[0m\t";
 }
 
-Error::Error() : num_warnings_(0), num_errors_(0) {
-}
+// Displays the given message in color in addition to printing an excerpt of
+// the given file at the given location, highlighting the erroneous segment.
+static void display_tty_error(Error::Level level, Location location,
+                              const string& message) {
+  // Display the error message
+  Color color(level);
+  std::error_code error;
+  std::cerr << color.underline(
+                   filesystem::proximate(*location.begin.path, error).string() +
+                   ":" + std::to_string(location.begin.line))
+            << color.colorful(" · " + message) << std::endl;
 
-Error::~Error() {
-}
-
-void Error::report(shared_ptr<Location> location, Level level, string message) {
-  switch (level) {
-    case Level::WARNING:
-      num_warnings_++;
-      break;
-    case Level::ERROR:
-      num_errors_++;
-      break;
-  }
-  show(location, level, message);
-}
-
-Error::Stream Error::report(shared_ptr<Location> location, Level level) {
-  return Error::Stream(*this, location, level);
-}
-
-TerminalError::TerminalError(Error::Level min_level)
-    : Error(),
-      out_(std::cerr),
-      min_level_(min_level),
-      tty_(isatty(STDERR_FILENO)) {
-}
-
-void TerminalError::show(shared_ptr<Location> location, Error::Level level,
-                         string message) {
-  if (min_level_ == Level::ERROR && level == Level::WARNING) {
+  // Don't try to display context for special paths like /dev/stdin.
+  if (!filesystem::is_regular_file(*location.begin.path)) {
     return;
   }
 
-  // Show in plaintext if stderr does not support ANSI colors
-  if (!tty_) {
-    if (location) {
-      out_ << "[" << short_path_name(location->file->path) << ":"
-           << location->start_line << "] ";
-    }
-    switch (level) {
-      case Level::WARNING:
-        out_ << "Warning: " << message << std::endl;
+  // Attempt to show an excerpt of the file and highlight the error
+  static const size_t excerpt_window = 2;
+  std::ifstream file(*location.begin.path);
+  size_t line_number = 0;
+  bool printed_excerpt = false;
+  string line;
+  while (std::getline(file, line)) {
+    line_number++;
+    if (line_number == location.begin.line) {
+      if (!printed_excerpt) {
+        std::cerr << std::endl;
+        printed_excerpt = true;
+      }
+      std::cerr << line_number_prefix(line_number, color.bold("→ "), 2);
+      size_t line_length = utf8::distance(line.begin(), line.end());
+      if (location.end.line > location.begin.line ||
+          line_length >= location.end.column) {
+        // Highlight the erroneous segment of the line in color
+        auto end_column = location.end.line > location.begin.line ?
+                              line_length :
+                              location.end.column;
+        auto start = line.begin();
+        utf8::advance(start, location.begin.column - 1, line.end());
+        auto end = line.begin();
+        utf8::advance(end, end_column, line.end());
+        std::cerr << string(line.begin(), start)
+                  << color.colorful(string(start, end))
+                  << string(end, line.end()) << std::endl;
+      } else {
+        std::cerr << line << std::endl;
+      }
+    } else if (line_number + excerpt_window >= location.begin.line &&
+               line_number <= location.begin.line + excerpt_window) {
+      if (!printed_excerpt) {
+        std::cerr << std::endl;
+        printed_excerpt = true;
+      }
+      std::cerr << line_number_prefix(line_number) << color.light(line)
+                << std::endl;
+      if (location.begin.line + excerpt_window == line_number) {
         break;
-      case Level::ERROR:
-        out_ << "Error: " << message << std::endl;
-        break;
-    }
-  }
-
-  // Otherwise, highlighting the error location in color
-  string color = level == Level::WARNING ? "\033[33m" : "\033[31m";
-  string bold = level == Level::WARNING ? "\033[33;1m" : "\033[31;1m";
-  string underline = level == Level::WARNING ? "\033[33;1;4m" : "\033[31;1;4m";
-  string reset = "\033[0m";
-
-  // Print file location and error message
-  std::stringstream formatted;
-  if (location) {
-    formatted << underline << short_path_name(location->file->path) << ":"
-              << location->start_line << reset << color << " · " << reset;
-  }
-  formatted << color << message << reset << std::endl;
-
-  // Print an excerpt from the file around the error
-  if (location) {
-    // How many lines around the erroneous line to print
-    static const int excerpt_window = 2;
-    bool printed_excerpt = false;
-    std::stringstream in(location->file->contents);
-    int line_number = 0;
-    while (in.good()) {
-      line_number++;
-      std::string line;
-      std::getline(in, line);
-      if (line_number == location->start_line) {
-        string arrow = bold + "→ " + reset;
-        formatted << line_number_prefix(line_number, arrow, 2);
-        if (line.size() >= location->end_column) {
-          // Highlight the erroneous segment of the line in color
-          auto end_column = location->end_line == location->start_line ?
-                                location->end_column :
-                                line.size();
-          formatted << line.substr(0, location->start_column - 1) << color
-                    << line.substr(location->start_column - 1,
-                                   end_column - location->start_column + 1)
-                    << reset << line.substr(end_column) << std::endl;
-        } else {
-          formatted << line << std::endl;
-        }
-      } else if (line_number + excerpt_window >= location->start_line &&
-                 line_number - excerpt_window <= location->start_line) {
-        if (!printed_excerpt) {
-          formatted << std::endl;
-          printed_excerpt = true;
-        }
-        formatted << line_number_prefix(line_number) << "\033[2m" << line
-                  << reset << std::endl;
-        if (location->start_line + excerpt_window == line_number) {
-          break;
-        }
       }
     }
-    if (printed_excerpt) {
-      formatted << std::endl;
-    }
   }
-
-  out_ << formatted.str();
+  if (printed_excerpt) {
+    std::cerr << std::endl;
+  }
 }
 
-Error::Stream::Stream(Error& error, shared_ptr<Location> location,
-                      Error::Level level)
-    : error_(error), location_(location), level_(level) {
+void Error::report(Error::Level level, Location location,
+                   const string& message) {
+  if (level == WARNING) {
+    warning_count_++;
+  } else {
+    error_count_++;
+  }
+  display(level, location, message);
 }
 
-Error::Stream::~Stream() {
-  error_.report(location_, level_, message_.str());
+void Error::report(Error::Level level, const string& message) {
+  if (level == WARNING) {
+    warning_count_++;
+  } else {
+    error_count_++;
+  }
+  display(level, message);
+}
+
+void Error::Terminal::display(Error::Level level, Location location,
+                              const string& message) {
+  assert(location.begin.path);
+  if (min_level_ == ERROR && level == WARNING) {
+    return;
+  }
+  if (isatty(STDERR_FILENO)) {
+    display_tty_error(level, location, message);
+  } else {
+    std::error_code error;
+    auto prefix = level == WARNING ? "Warning" : "Error";
+    std::cerr << prefix << ": "
+              << filesystem::proximate(*location.begin.path, error).string()
+              << ":" << location.begin.line << ": " << message << std::endl;
+  }
+}
+
+void Error::Terminal::display(Error::Level level, const string& message) {
+  if (min_level_ == ERROR && level == WARNING) {
+    return;
+  }
+  string prefix = level == WARNING ? "Warning" : "Error";
+  if (isatty(STDERR_FILENO)) {
+    Color color(level);
+    std::error_code error;
+    std::cerr << color.underline(prefix + ":") << color.colorful(" " + message)
+              << std::endl;
+  } else {
+    std::cerr << prefix << ": " << message << std::endl;
+  }
 }
 
 }

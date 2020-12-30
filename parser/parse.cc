@@ -14,30 +14,41 @@
 
 #include "parse.h"
 
+#include <fstream>
+#include <utf8.h>
+
 #include "grammar.h"
 #include "scanner.h"
-#include "state.h"
 
 extern int yyparse(void*);
 
 namespace compiler::parser {
 
-shared_ptr<Module> parse(shared_ptr<Error> error, const string& path) {
-  auto file = File::read(path);
-  if (!file) {
-    error->report(nullptr) << "Cannot open " << path;
+shared_ptr<Module> parse(shared_ptr<Error> error,
+                         const filesystem::path& path) {
+  std::ifstream input(path);
+  if (!input) {
+    error->report(Error::ERROR, "Could not open " + path.string());
     return nullptr;
   }
-  auto module = make_shared<Module>(file);
-  State state(error, module);
-  yylex_init(&state.state);
-  yyset_extra(&state, state.state);
-  int result = yyparse(&state);
-  yylex_destroy(state.state);
-  if (result == 0) {
-    return module;
+
+  State state{
+      .position{.path = make_shared<filesystem::path>(path)},
+      .input = input,
+      .error = error,
+  };
+  yyscan_t scanner;
+  yylex_init_extra(&state, &scanner);
+  Grammar grammar(scanner);
+  int result = -1;
+  try {
+    result = grammar.parse();
+  } catch (const utf8::exception&) {
+    error->report(Error::ERROR,
+                  path.string() + " contains invalid UTF-8 characters");
   }
-  return nullptr;
+  yylex_destroy(scanner);
+  return result == 0 ? state.module : nullptr;
 }
 
 }

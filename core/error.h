@@ -14,95 +14,61 @@
 
 #pragma once
 
-#include <iostream>
-#include <sstream>
-
 #include "common.h"
-#include "file.h"
+#include "location.h"
 
 namespace compiler {
 
-// All compiler errors are reported through an instance of this abstract class.
-// If you are embedding the compiler in another application, you can subclass
-// this to redirect errors through the appropriate interface.
-//
-// If you are running from the command line, use the standard
-// TerminalError implemenation below.
+// Displays error messages from the compiler to the end user. We also track
+// the number of warnings and errors so clients can track if there were
+// errors at different phases of compilation.
 class Error {
  public:
-  Error();
-  virtual ~Error();
+  class Terminal;
 
-  // The error level, where WARNING represents a non-fatal error.
-  enum class Level {
+  enum Level {
     WARNING,
     ERROR,
   };
 
-  class Stream;
+  virtual ~Error() {
+  }
 
-  // Reports the given error at the given file location.
-  void report(shared_ptr<Location> location, Level level, string message);
+  // Reports an error at the given location in the given file.
+  void report(Level level, Location location, const string& message);
 
-  // Returns a stream-style interface for error-reporting:
-  //
-  //   error.report(ast->location) << "Unrecognized name: " << ast->identifier;
-  //
-  // The error is reported when the returned object is destructed.
-  Stream report(shared_ptr<Location> location, Level level = Level::ERROR);
+  // Reports an error not associated with a file location.
+  void report(Level level, const string& message);
 
   // Returns the number of errors at or above the given level.
-  inline size_t count(Level min_level = Level::ERROR) const {
-    return min_level == Level::WARNING ? num_warnings_ + num_errors_ :
-                                         num_errors_;
+  inline size_t count(Level min_level = ERROR) const {
+    return min_level == WARNING ? warning_count_ + error_count_ : error_count_;
   }
 
  protected:
-  // Displays the given error to the end user.
-  virtual void show(shared_ptr<Location> location, Level level,
-                    string message) = 0;
+  virtual void display(Level level, Location location,
+                       const string& message) = 0;
+  virtual void display(Level level, const string& message) = 0;
 
  private:
-  size_t num_warnings_;
-  size_t num_errors_;
+  size_t error_count_ = 0;
+  size_t warning_count_ = 0;
 };
 
-// A helper class to support a stream-style interface for error-reporting:
-//
-//   TerminalError error;
-//   error.report(ast->location) << "Unrecognized name: " << ast->identifier;
-//
-class Error::Stream {
+// An implementation of Error that prints errors to stderr, with color if
+// stderr is a TTY.
+class Error::Terminal : public Error {
  public:
-  Stream(Error& error, shared_ptr<Location> location, Error::Level level);
-  ~Stream();
-
-  template <typename T>
-  Stream& operator<<(const T& value) {
-    message_ << value;
-    return *this;
+  // Prints errors at or above the given minimum level.
+  Terminal(Level min_level = WARNING) : min_level_(min_level) {
   }
 
- private:
-  Error& error_;
-  shared_ptr<Location> location_;
-  Error::Level level_;
-  std::stringstream message_;
-};
-
-// Prints errors to the terminal, using color if supported.
-class TerminalError : public Error {
- public:
-  TerminalError(Level min_level = Level::WARNING);
-
  protected:
-  virtual void show(shared_ptr<Location> location, Level level,
-                    string message) override;
+  void display(Level level, Location location, const string& message) override;
+  void display(Level level, const string& message) override;
 
  private:
-  std::ostream& out_;
   Level min_level_;
-  bool tty_;
 };
 
-}
+};
