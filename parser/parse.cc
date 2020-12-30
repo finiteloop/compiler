@@ -33,8 +33,8 @@ shared_ptr<Module> parse(shared_ptr<Error> error,
   }
 
   State state{
-      .position{.path = make_shared<filesystem::path>(path)},
       .input = input,
+      .position{.path = make_shared<filesystem::path>(path)},
       .error = error,
   };
   yyscan_t scanner;

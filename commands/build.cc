@@ -85,7 +85,7 @@ bool Build::execute(const filesystem::path& executable,
   }
   auto llvm_machine = llvm_target->createTargetMachine(
       target.c_str(), "generic", "", llvm::TargetOptions(),
-      llvm::Optional<llvm::Reloc::Model>());
+      llvm::Reloc::Model::PIC_);
   auto llvm_module = new llvm::Module(arguments[0], llvm_context);
   llvm_module->setDataLayout(llvm_machine->createDataLayout());
   auto llvm_function = emitter::emit(module, llvm_module);
@@ -98,8 +98,8 @@ bool Build::execute(const filesystem::path& executable,
 
   // Write the object file
   char object_path[PATH_MAX];
-  strcpy(object_path, P_tmpdir);
-  strcpy(object_path + strlen(P_tmpdir), "XXXXXXXXXX.o");
+  auto pattern = filesystem::temp_directory_path() / "XXXXXXXXXX.o";
+  strcpy(object_path, pattern.c_str());
   auto object_fd = mkstemps(object_path, 2);
   if (object_fd == -1) {
     error->report(Error::ERROR,
